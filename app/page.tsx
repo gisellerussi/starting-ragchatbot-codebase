@@ -10,6 +10,9 @@ type ActionItem = {
 export default function Home() {
   const [notes, setNotes] = useState("");
   const [actionItems, setActionItems] = useState<ActionItem[]>([]);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+  const [nextId, setNextId] = useState(1000); // Start high to avoid conflicts with extracted items
 
   // Very simple rule: treat any non-empty line that
   // - starts with "-" or "*" OR
@@ -23,8 +26,13 @@ export default function Home() {
         const line = rawLine.trim();
         if (!line) return null;
 
+        // Accept lines starting with "- " or "* " (with space) OR
+        // lines starting with "-" or "*" followed by any character (more flexible)
         const looksLikeBullet =
-          line.startsWith("- ") || line.startsWith("* ");
+          line.startsWith("- ") ||
+          line.startsWith("* ") ||
+          (line.startsWith("-") && line.length > 1) ||
+          (line.startsWith("*") && line.length > 1);
         const containsTodo = line.toLowerCase().includes("todo");
 
         if (!looksLikeBullet && !containsTodo) {
@@ -32,16 +40,58 @@ export default function Home() {
         }
 
         // Remove leading bullet marker if present for a cleaner description.
-        const cleaned = line.replace(/^[-*]\s+/, "");
+        // Handles both "- " and "-" (with or without space)
+        const cleaned = line.replace(/^[-*]\s*/, "");
 
         return {
-          id: index,
+          id: nextId + index,
           description: cleaned,
         } satisfies ActionItem;
       })
       .filter((item): item is ActionItem => item !== null);
 
     setActionItems(items);
+    // Update nextId to be higher than any extracted item
+    if (items.length > 0) {
+      const maxId = Math.max(...items.map((item) => item.id));
+      setNextId(maxId + 1);
+    }
+  };
+
+  const addActionItem = () => {
+    const newItem: ActionItem = {
+      id: nextId,
+      description: "",
+    };
+    setActionItems([...actionItems, newItem]);
+    setNextId(nextId + 1);
+    // Start editing the new item immediately
+    setEditingId(newItem.id);
+    setEditingValue("");
+  };
+
+  const startEditing = (id: number, currentValue: string) => {
+    setEditingId(id);
+    setEditingValue(currentValue);
+  };
+
+  const saveEdit = (id: number) => {
+    setActionItems(
+      actionItems.map((item) =>
+        item.id === id ? { ...item, description: editingValue } : item
+      )
+    );
+    setEditingId(null);
+    setEditingValue("");
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditingValue("");
+  };
+
+  const deleteActionItem = (id: number) => {
+    setActionItems(actionItems.filter((item) => item.id !== id));
   };
 
   const downloadCsv = () => {
@@ -128,23 +178,83 @@ Some regular text that will be ignored.`}
         </section>
 
         <section className="space-y-2">
-          <h2 className="text-sm font-medium text-zinc-700">Action items</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-zinc-700">Action items</h2>
+            <button
+              type="button"
+              onClick={addActionItem}
+              className="inline-flex items-center rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-800 hover:bg-zinc-100"
+            >
+              + Add Action Item
+            </button>
+          </div>
           {actionItems.length === 0 ? (
             <p className="text-sm text-zinc-500">
-              After you extract, your action items will appear here.
+              After you extract, your action items will appear here. Or click
+              "Add Action Item" to create one manually.
             </p>
           ) : (
-            <ul className="space-y-1 border border-zinc-200 rounded-md bg-white p-3">
-              {actionItems.map((item) => (
-                <li
-                  key={item.id}
-                  className="text-sm text-zinc-800 flex items-start gap-2"
-                >
-                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-zinc-400" />
-                  <span>{item.description}</span>
-                </li>
-              ))}
-            </ul>
+            <div className="border border-zinc-200 rounded-md bg-white overflow-hidden">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-zinc-200 bg-zinc-50">
+                    <th className="text-left text-xs font-medium text-zinc-700 px-3 py-2">
+                      Description
+                    </th>
+                    <th className="w-12"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {actionItems.map((item) => (
+                    <tr
+                      key={item.id}
+                      className="border-b border-zinc-100 last:border-b-0 hover:bg-zinc-50"
+                    >
+                      <td className="px-3 py-2">
+                        {editingId === item.id ? (
+                          <input
+                            type="text"
+                            value={editingValue}
+                            onChange={(e) => setEditingValue(e.target.value)}
+                            onBlur={() => saveEdit(item.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                saveEdit(item.id);
+                              } else if (e.key === "Escape") {
+                                cancelEdit();
+                              }
+                            }}
+                            autoFocus
+                            className="w-full text-sm text-zinc-800 px-2 py-1 border border-zinc-300 rounded focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:border-zinc-900"
+                          />
+                        ) : (
+                          <div
+                            onClick={() => startEditing(item.id, item.description)}
+                            className="text-sm text-zinc-800 cursor-text hover:bg-zinc-100 px-2 py-1 rounded -mx-2 -my-1 min-h-[1.5rem] flex items-center"
+                          >
+                            {item.description || (
+                              <span className="text-zinc-400 italic">
+                                Click to edit
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <button
+                          type="button"
+                          onClick={() => deleteActionItem(item.id)}
+                          className="text-zinc-400 hover:text-zinc-600 text-xs"
+                          title="Delete"
+                        >
+                          ×
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </section>
       </main>
